@@ -97,7 +97,7 @@ stages:
   script:
     - snyk test \
         --org="${SNYK_ORG}" \
-        --project-name="${ADDON_GITHUB_REPO}"
+        --project-name="${ADDON_GITHUB_REPO}" \
         --docker "${CI_PROJECT_PATH}/${ADDON_ARCH}:${CI_COMMIT_SHA}" \
         --file="${ADDON_TARGET}/Dockerfile"
   tags:
@@ -514,7 +514,7 @@ snyk:monitor:
   script:
     - snyk monitor \
         --org="${SNYK_ORG}" \
-        --project-name="${ADDON_GITHUB_REPO}"
+        --project-name="${ADDON_GITHUB_REPO}" \
         --docker "${CI_PROJECT_PATH}/${ADDON_ARCH}:${CI_COMMIT_SHA}" \
         --file="${ADDON_TARGET}/Dockerfile"
   only:

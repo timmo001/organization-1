@@ -91,6 +91,9 @@ stages:
   allow_failure: true
   before_script:
     - docker info
+    - curl -L -s -o /usr/bin/snyk \
+        "https://github.com/snyk/snyk/releases/download/v1.120.1/snyk-linux"
+    - chmod a+x /usr/bin/snyk
     - docker pull "registry.gitlab.com/${CI_PROJECT_PATH}/${ADDON_ARCH}:${CI_COMMIT_SHA}"
   script:
     - snyk test \
@@ -505,6 +508,9 @@ snyk:monitor:
   allow_failure: true
   before_script:
     - docker info
+    - curl -L -s -o /usr/bin/snyk \
+        "https://github.com/snyk/snyk/releases/download/v1.120.1/snyk-linux"
+    - chmod a+x /usr/bin/snyk
     - docker pull "registry.gitlab.com/${CI_PROJECT_PATH}/${ADDON_ARCH}:${CI_COMMIT_SHA}"
   script:
     - snyk monitor \

@@ -91,6 +91,7 @@ stages:
   allow_failure: true
   before_script:
     - docker info
+    - apk add --no-cache curl
     - curl -L -s -o /usr/bin/snyk \
         "https://github.com/snyk/snyk/releases/download/v1.120.1/snyk-linux"
     - chmod a+x /usr/bin/snyk
@@ -508,6 +509,7 @@ snyk:monitor:
   allow_failure: true
   before_script:
     - docker info
+    - apk add --no-cache curl
     - curl -L -s -o /usr/bin/snyk \
         "https://github.com/snyk/snyk/releases/download/v1.120.1/snyk-linux"
     - chmod a+x /usr/bin/snyk

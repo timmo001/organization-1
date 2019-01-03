@@ -1,0 +1,490 @@
+---
+image: docker:latest
+
+variables:
+  ADDON_GITHUB_REPO: "hassio-addons/addon-example"
+  ADDON_SLUG: "example"
+  ADDON_TARGET: "example"
+
+  ADDON_AARCH64: "false"
+  ADDON_AMD64: "false"
+  ADDON_ARMHF: "false"
+  ADDON_I386: "false"
+
+  ADDON_AARCH64_BASE: "hassioaddons/base-aarch64:latest"
+  ADDON_AMD64_BASE: "hassioaddons/base-amd64:latest"
+  ADDON_ARMHF_BASE: "hassioaddons/base-armhf:latest"
+  ADDON_I386_BASE: "hassioaddons/base-i386:latest"
+
+  ADDON_AARCH64_VARIANT: "v8"
+  ADDON_ARMHF_VARIANT: "v6"
+
+  ADDON_LEGACY_TAGS: "false"
+
+  ADDONS_REPO_STABLE: "hassio-addons/repository"
+  ADDONS_REPO_BETA: "hassio-addons/repository-beta"
+  ADDONS_REPO_EDGE: "hassio-addons/repository-edge"
+
+  SNYK_ORG: "community-hass.io-add-ons"
+
+  DOCKER_DRIVER: overlay2
+  DOCKER_HUB_ORG: hassioaddons
+
+stages:
+  - preflight
+  - build
+  - scan
+  - deploy
+  - manifest
+  - publish
+
+# Generic DIND template
+.dind: &dind
+  before_script:
+    - docker info
+  services:
+    - name: docker:dind
+      command: ["--experimental"]
+
+# Generic preflight template
+.preflight: &preflight
+  stage: preflight
+  tags:
+    - preflight
+
+# Generic build template
+.build: &build
+  <<: *dind
+  stage: build
+  before_script:
+    - docker info
+    - |
+      if [ "$(apk --print-arch)" = "amd64" ]; then
+        docker run --rm --privileged hassioaddons/qemu-user-static:latest
+      fi
+    - |
+      echo "${CI_JOB_TOKEN}" | docker login \
+        --username gitlab-ci-token \
+        --password-stdin \
+        registry.gitlab.com
+    - docker pull "registry.gitlab.com/${CI_PROJECT_PATH}/${ADDON_ARCH}:cache" || true
+  script:
+    - |
+      docker build \
+        --build-arg "BUILD_FROM=${FROM}" \
+        --build-arg "BUILD_DATE=$(date +"%Y-%m-%dT%H:%M:%SZ")" \
+        --build-arg "BUILD_ARCH=${ADDON_ARCH}" \
+        --build-arg "BUILD_REF=${CI_COMMIT_SHA}" \
+        --build-arg "BUILD_VERSION=${CI_COMMIT_TAG:-${CI_COMMIT_SHA:0:7}}" \
+        --cache-from "registry.gitlab.com/${CI_PROJECT_PATH}/${ADDON_ARCH}:cache" \
+        --tag \
+          "registry.gitlab.com/${CI_PROJECT_PATH}/${ADDON_ARCH}:${CI_COMMIT_SHA}" \
+        "${ADDON_TARGET}"
+    - |
+      docker push \
+        "registry.gitlab.com/${CI_PROJECT_PATH}/${ADDON_ARCH}:${CI_COMMIT_SHA}"
+  only:
+    variables:
+      - $ADDON_ARCH_ENABLED == "true"
+
+# Generic scan template
+.scan: &scan
+  <<: *dind
+  stage: scan
+  allow_failure: true
+  before_script:
+    - docker info
+    - docker pull "registry.gitlab.com/${CI_PROJECT_PATH}/${ADDON_ARCH}:${CI_COMMIT_SHA}"
+  script:
+    - snyk test \
+        --docker "registry.gitlab.com/${CI_PROJECT_PATH}/${ADDON_ARCH}:${CI_COMMIT_SHA}" \
+        --file "${ADDON_TARGET}/Dockerfile"
+  tags:
+    - scan
+
+# Generic deploy template
+.deploy: &deploy
+  <<: *dind
+  stage: deploy
+  before_script:
+    - docker info
+    - docker pull "registry.gitlab.com/${CI_PROJECT_PATH}/${ADDON_ARCH}:${CI_COMMIT_SHA}"
+    - |
+      echo "${CI_JOB_TOKEN}" | docker login \
+        --username gitlab-ci-token \
+        --password-stdin \
+        registry.gitlab.com
+    - |
+      echo "${DOCKER_PASSWORD}" | docker login \
+        --username "${DOCKER_LOGIN}" \
+        --password-stdin
+  script:
+    - |
+      docker tag \
+        "registry.gitlab.com/${CI_PROJECT_PATH}/${ADDON_ARCH}:${CI_COMMIT_SHA}" \
+        "registry.gitlab.com/${CI_PROJECT_PATH}/${ADDON_ARCH}:cache"
+    - docker push "registry.gitlab.com/${CI_PROJECT_PATH}/${ADDON_ARCH}:cache"
+    - TAG="${CI_COMMIT_TAG#v}"
+    - TAG="${TAG:-${CI_COMMIT_SHA:0:7}}"
+    - |
+      docker tag \
+        "registry.gitlab.com/${CI_PROJECT_PATH}/${ADDON_ARCH}:${CI_COMMIT_SHA}" \
+        "${DOCKER_HUB_ORG}/${ADDON_SLUG}:${ADDON_ARCH}-${TAG}"
+    - |
+      docker push \
+        "${DOCKER_HUB_ORG}/${ADDON_SLUG}:${ADDON_ARCH}-${TAG}"
+    - |
+      if [ "${ADDON_LEGACY_TAGS}" = "true" ]; then
+        docker tag \
+          "registry.gitlab.com/${CI_PROJECT_PATH}/${ADDON_ARCH}:${CI_COMMIT_SHA}" \
+          "${DOCKER_HUB_ORG}/${ADDON_SLUG}-${ADDON_ARCH}:${TAG}"
+        docker push \
+          "${DOCKER_HUB_ORG}/${ADDON_SLUG}-${ADDON_ARCH}:${TAG}"
+      fi
+  tags:
+    - deploy
+  only:
+    refs:
+      - master
+      - /^v\d+\.\d+\.\d+(?:-(?:beta|rc)(?:(?:(?:\+|\.)?[a-zA-Z0-9]+)*)?)?$/
+    variables:
+      - $ADDON_ARCH_ENABLED == "true"
+  except:
+    - /^(?!master).+@/
+
+# Generic manifest template
+.manifest: &manifest
+  <<: *dind
+  stage: manifest
+  before_script:
+    - mkdir -p ~/.docker
+    - echo '{"experimental":"enabled"}' > ~/.docker/config.json
+    - docker info
+    - |
+      echo "${DOCKER_PASSWORD}" | docker login \
+        --username "${DOCKER_LOGIN}" \
+        --password-stdin
+  script:
+    - TAG="${TAG#v}"
+    - TAG="${TAG:-${CI_COMMIT_SHA:0:7}}"
+    - REF="${CI_COMMIT_TAG#v}"
+    - REF="${REF:-${CI_COMMIT_SHA:0:7}}"
+    - |
+      if [ "${ADDON_AARCH64}" = "true" ]; then
+        docker manifest create \
+          --amend
+          "${DOCKER_HUB_ORG}/${ADDON_SLUG}:${TAG}" \
+          "${DOCKER_HUB_ORG}/${ADDON_SLUG}:aarch64-${REF}"
+
+        docker manifest annotate \
+          "${DOCKER_HUB_ORG}/${ADDON_SLUG}:${TAG}" \
+          "${DOCKER_HUB_ORG}/${ADDON_SLUG}:aarch64-${REF}" \
+          --os=linux \
+          --arch=arm64 \
+          --variant="${ADDON_AARCH64_VARIANT}"
+      fi
+    - |
+      if [ "${ADDON_AMD64}" = "true" ]; then
+        docker manifest create \
+          --amend
+          "${DOCKER_HUB_ORG}/${ADDON_SLUG}:${TAG}" \
+          "${DOCKER_HUB_ORG}/${ADDON_SLUG}:amd64-${REF}"
+          
+        docker manifest annotate \
+          "${DOCKER_HUB_ORG}/${ADDON_SLUG}:${TAG}" \
+          "${DOCKER_HUB_ORG}/${ADDON_SLUG}:amd64-${REF}" \
+          --os=linux \
+          --arch=amd64
+      fi
+    - |
+      if [ "${ADDON_ARMHF}" = "true" ]; then
+        docker manifest create \
+          --amend
+          "${DOCKER_HUB_ORG}/${ADDON_SLUG}:${TAG}" \
+          "${DOCKER_HUB_ORG}/${ADDON_SLUG}:armhf-${REF}"
+
+        docker manifest annotate \
+          "${DOCKER_HUB_ORG}/${ADDON_SLUG}:${TAG}" \
+          "${DOCKER_HUB_ORG}/${ADDON_SLUG}:armhf-${REF}" \
+          --os=linux \
+          --arch=arm \
+          --variant="${ADDON_ARMHF_VARIANT}"
+      fi
+    - |
+      if [ "${ADDON_I386}" = "true" ]; then
+        docker manifest create \
+          --amend
+          "${DOCKER_HUB_ORG}/${ADDON_SLUG}:${TAG}" \
+          "${DOCKER_HUB_ORG}/${ADDON_SLUG}:armhf-${REF}"
+
+        docker manifest annotate \
+          "${DOCKER_HUB_ORG}/${ADDON_SLUG}:${TAG}" \
+          "${DOCKER_HUB_ORG}/${ADDON_SLUG}:i386-${REF}" \
+          --os=linux \
+          --arch=386
+    - |
+      docker manifest push \
+        "${DOCKER_HUB_ORG}/${ADDON_SLUG}:${TAG}"
+  tags:
+    - manifest
+  except:
+    - /^(?!master).+@/
+
+# Generic publish template
+.publish: &publish
+  stage: publish
+  image:
+    name: hassioaddons/repository-updater:latest
+    entrypoint: [""]
+  script:
+    - |
+      repository-updater \
+        --token "${GITHUB_TOKEN}" \
+        --repository "${REPOSITORY}" \
+        --addon "${ADDON_GITHUB_REPO}"
+  tags:
+    - publish
+  except:
+    - /^(?!master).+@/
+
+# Preflight jobs
+hadolint:
+  <<: *preflight
+  image: pipelinecomponents/hadolint:latest
+  before_script:
+    - hadolint --version
+  script:
+    - hadolint "${ADDON_TARGET}/Dockerfile"
+
+shellcheck:
+  <<: *preflight
+  image: pipelinecomponents/shellcheck:latest
+  before_script:
+    - shellcheck --version
+    - apk --no-cache add grep
+    - |
+      find . -type f -print0 | \
+        xargs -0 sed -i 's:#!/usr/bin/with-contenv bash:#!/bin/bash:g'
+  script:
+    - |
+      for file in $(grep -IRl "#\!\(/usr/bin/env \|/bin/\)" --exclude-dir ".git" "${ADDON_TARGET}"); do
+        if ! shellcheck $file; then
+          export FAILED=1
+        else
+          echo "$file OK"
+        fi
+      done
+      if [ "${FAILED}" = "1" ]; then
+        exit 1
+      fi
+
+yamllint:
+  <<: *preflight
+  image: pipelinecomponents/yamllint:latest
+  before_script:
+    - yamllint --version
+  script:
+    - yamllint .
+
+jsonlint:
+  <<: *preflight
+  image: pipelinecomponents/jsonlint:latest
+  before_script:
+    - jsonlint --version || true
+  script:
+    - |
+      for file in $(find . -type f -name "*.json"); do
+        if ! jsonlint -q $file; then
+          export FAILED=1
+        else
+          echo "$file OK"
+        fi
+      done
+      if [ "${FAILED}" = "1" ]; then
+        exit 1
+      fi
+
+markdownlint:
+  <<: *preflight
+  image: pipelinecomponents/markdownlint:latest
+  before_script:
+    - mdl --version
+  script:
+    - mdl --style all --warnings .
+
+# Build Jobs
+build:armhf:
+  <<: *build
+  variables:
+    ADDON_ARCH: armhf
+    ADDON_ARCH_ENABLED: "${ADDON_ARMHF}"
+    FROM: "${ADDON_ARMHF_BASE}"
+  tags:
+    - build
+    - armhf
+
+build:aarch64:
+  <<: *build
+  variables:
+    ADDON_ARCH: aarch64
+    ADDON_ARCH_ENABLED: "${ADDON_AARCH64}"
+    FROM: "${ADDON_AARCH64_BASE}"
+  tags:
+    - build
+    - aarch64
+
+build:i386:
+  <<: *build
+  variables:
+    ADDON_ARCH: i386
+    ADDON_ARCH_ENABLED: "${ADDON_I386}"
+    FROM: "${ADDON_I386_BASE}"
+  tags:
+    - build
+    - i386
+
+build:amd64:
+  <<: *build
+  variables:
+    ADDON_ARCH: amd64
+    ADDON_ARCH_ENABLED: "${ADDON_AMD64}"
+    FROM: "${ADDON_AMD64_BASE}"
+  tags:
+    - build
+    - amd64
+
+# Scan jobs
+snyk:armhf:
+  <<: *scan
+  variables:
+    ADDON_ARCH: armhf
+  only:
+    variables:
+      - $ADDON_ARMHF == "true"
+
+snyk:aarch64:
+  <<: *scan
+  variables:
+    ADDON_ARCH: aarch64
+  only:
+    variables:
+      - $ADDON_AARCH64 == "true"
+
+snyk:i386:
+  <<: *scan
+  variables:
+    ADDON_ARCH: i386
+  only:
+    variables:
+      - $ADDON_I386 == "true"
+
+snyk:amd64:
+  <<: *scan
+  variables:
+    ADDON_ARCH: amd64
+  only:
+    variables:
+      - $ADDON_AMD64 == "true"
+
+# Deploy jobs
+deploy:armhf:
+  <<: *deploy
+  variables:
+    ADDON_ARCH: armhf
+    ADDON_ARCH_ENABLED: "${ADDON_ARMHF}"
+
+deploy:aarch64:
+  <<: *deploy
+  variables:
+    ADDON_ARCH: aarch64
+    ADDON_ARCH_ENABLED: "${ADDON_AARCH64}"
+
+deploy:i386:
+  <<: *deploy
+  variables:
+    ADDON_ARCH: i386
+    ADDON_ARCH_ENABLED: "${ADDON_I386}"
+
+deploy:amd64:
+  <<: *deploy
+  variables:
+    ADDON_ARCH: amd64
+    ADDON_ARCH_ENABLED: "${ADDON_AMD64}"
+
+# Manifest jobs
+manifest:sha:
+  <<: *manifest
+  only:
+    - master
+
+manifest:version:
+  <<: *manifest
+  variables:
+    TAG: "${CI_COMMIT_TAG}"
+  only:
+    - /^v\d+\.\d+\.\d+(?:-(?:beta|rc)(?:(?:(?:\+|\.)?[a-zA-Z0-9]+)*)?)?$/
+
+manifest:stable:
+  <<: *manifest
+  variables:
+    TAG: latest
+  only:
+    - /^v\d+\.\d+\.\d+(?:(?:(?:\+|\.)?[a-zA-Z0-9]+)*)?$/
+
+manifest:beta:
+  <<: *manifest
+  variables:
+    TAG: beta
+  only:
+    - /^v\d+\.\d+\.\d+(?:-(?:beta|rc)(?:(?:(?:\+|\.)?[a-zA-Z0-9]+)*)?)?$/
+
+manifest:edge:
+  <<: *manifest
+  variables:
+    TAG: edge
+  only:
+    - master
+
+# Publish jobs
+publish:stable:
+  <<: *publish
+  variables:
+    REPOSITORY: "${ADDONS_REPO_STABLE}"
+  only:
+    - /^v\d+\.\d+\.\d+(?:(?:(?:\+|\.)?[a-zA-Z0-9]+)*)?$/
+  environment:
+    name: stable
+
+publish:beta:
+  <<: *publish
+  variables:
+    REPOSITORY: "${ADDONS_REPO_BETA}"
+  only:
+    - /^v\d+\.\d+\.\d+(?:-(?:beta|rc)(?:(?:(?:\+|\.)?[a-zA-Z0-9]+)*)?)?$/
+  environment:
+    name: beta
+
+publish:edge:
+  <<: *publish
+  variables:
+    REPOSITORY: "${ADDONS_REPO_EDGE}"
+  only:
+    - master
+  environment:
+    name: edge
+
+snyk:monitor:
+  <<: *publish
+  stage: scan
+  allow_failure: true
+  before_script:
+    - docker info
+    - docker pull "registry.gitlab.com/${CI_PROJECT_PATH}/${ADDON_ARCH}:${CI_COMMIT_SHA}"
+  script:
+    - snyk monitor \
+        --org="${SNYK_ORG}" \
+        --project-name="${ADDON_GITHUB_REPO}"
+        --docker "registry.gitlab.com/${CI_PROJECT_PATH}/${ADDON_ARCH}:${CI_COMMIT_SHA}" \
+        --file="${ADDON_TARGET}/Dockerfile"
+  only:
+    - /^v\d+\.\d+\.\d+(?:(?:(?:\+|\.)?[a-zA-Z0-9]+)*)?$/

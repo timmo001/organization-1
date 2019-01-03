@@ -87,7 +87,7 @@ stages:
 # Generic scan template
 .scan: &scan
   <<: *dind
-  image: pipelinecomponents/snyk:latest
+  image: pipelinecomponents/snyk:edge
   stage: scan
   allow_failure: true
   before_script:
@@ -162,7 +162,7 @@ stages:
     - |
       if [ "${ADDON_AARCH64}" = "true" ]; then
         docker manifest create \
-          --amend
+          --amend \
           "${DOCKER_HUB_ORG}/${ADDON_SLUG}:${TAG}" \
           "${DOCKER_HUB_ORG}/${ADDON_SLUG}:aarch64-${REF}"
 
@@ -176,7 +176,7 @@ stages:
     - |
       if [ "${ADDON_AMD64}" = "true" ]; then
         docker manifest create \
-          --amend
+          --amend \
           "${DOCKER_HUB_ORG}/${ADDON_SLUG}:${TAG}" \
           "${DOCKER_HUB_ORG}/${ADDON_SLUG}:amd64-${REF}"
           
@@ -189,7 +189,7 @@ stages:
     - |
       if [ "${ADDON_ARMHF}" = "true" ]; then
         docker manifest create \
-          --amend
+          --amend \
           "${DOCKER_HUB_ORG}/${ADDON_SLUG}:${TAG}" \
           "${DOCKER_HUB_ORG}/${ADDON_SLUG}:armhf-${REF}"
 
@@ -203,7 +203,7 @@ stages:
     - |
       if [ "${ADDON_I386}" = "true" ]; then
         docker manifest create \
-          --amend
+          --amend \
           "${DOCKER_HUB_ORG}/${ADDON_SLUG}:${TAG}" \
           "${DOCKER_HUB_ORG}/${ADDON_SLUG}:armhf-${REF}"
 
@@ -501,7 +501,7 @@ publish:edge:
 
 snyk:monitor:
   <<: *publish
-  image: pipelinecomponents/snyk:latest
+  image: pipelinecomponents/snyk:edge
   allow_failure: true
   before_script:
     - docker info

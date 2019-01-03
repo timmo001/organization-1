@@ -90,6 +90,7 @@ stages:
 # Generic scan template
 .scan: &scan
   <<: *dind
+  image: pipelinecomponents/snyk:latest
   stage: scan
   allow_failure: true
   before_script:
@@ -475,7 +476,7 @@ publish:edge:
 
 snyk:monitor:
   <<: *publish
-  stage: scan
+  image: pipelinecomponents/snyk:latest
   allow_failure: true
   before_script:
     - docker info

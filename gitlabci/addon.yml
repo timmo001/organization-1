@@ -87,7 +87,6 @@ stages:
 # Generic scan template
 .scan: &scan
   <<: *dind
-  image: pipelinecomponents/snyk:edge
   stage: scan
   allow_failure: true
   before_script:
@@ -212,6 +211,7 @@ stages:
           "${DOCKER_HUB_ORG}/${ADDON_SLUG}:i386-${REF}" \
           --os=linux \
           --arch=386
+      fi
     - |
       docker manifest push \
         "${DOCKER_HUB_ORG}/${ADDON_SLUG}:${TAG}"

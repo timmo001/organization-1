@@ -98,7 +98,7 @@ stages:
     - snyk test \
         --org="${SNYK_ORG}" \
         --project-name="${ADDON_GITHUB_REPO}" \
-        --docker "${CI_PROJECT_PATH}/${ADDON_ARCH}:${CI_COMMIT_SHA}" \
+        --docker "registry.gitlab.com/${CI_PROJECT_PATH}/${ADDON_ARCH}:${CI_COMMIT_SHA}" \
         --file="${ADDON_TARGET}/Dockerfile"
   tags:
     - scan
@@ -510,12 +510,12 @@ snyk:monitor:
   before_script:
     - export DOCKER_HOST="tcp://docker:2375"
     - docker info
-    - docker pull "${CI_PROJECT_PATH}/${ADDON_ARCH}:${CI_COMMIT_SHA}"
+    - docker pull "registry.gitlab.com/${CI_PROJECT_PATH}/${ADDON_ARCH}:${CI_COMMIT_SHA}"
   script:
     - snyk monitor \
         --org="${SNYK_ORG}" \
         --project-name="${ADDON_GITHUB_REPO}" \
-        --docker "${CI_PROJECT_PATH}/${ADDON_ARCH}:${CI_COMMIT_SHA}" \
+        --docker "registry.gitlab.com/${CI_PROJECT_PATH}/${ADDON_ARCH}:${CI_COMMIT_SHA}" \
         --file="${ADDON_TARGET}/Dockerfile"
   only:
     - /^v\d+\.\d+\.\d+(?:(?:(?:\+|\.)?[a-zA-Z0-9]+)*)?$/

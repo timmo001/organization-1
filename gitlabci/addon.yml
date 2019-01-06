@@ -35,6 +35,14 @@ variables:
   PREFLIGHT_YAMLLINT: "false"
   
   SNYK_ORG: "community-hass.io-add-ons"
+
+  SNYK_COMPOSER: "false"
+  SNYK_DOCKER: "false"
+  SNYK_NPM: "false"
+  SNYK_PIP: "false"
+  SNYK_RUBY: "false"
+  SNYK_YARN: "false"
+
   SNYK_MONITOR: "false"
   SNYK_MONITOR_ARCH: "amd64"
 
@@ -98,43 +106,18 @@ stages:
 
 # Generic scan template
 .scan: &scan
-  <<: *dind
   stage: scan
   image: pipelinecomponents/snyk:edge
   allow_failure: true
-  before_script:
-    - docker info
-    - docker pull "registry.gitlab.com/${CI_PROJECT_PATH}/${ADDON_ARCH}:${CI_COMMIT_SHA}"
   script:
     - |
+      find . \
+        -name ${SCANFILE}  -print0 | \
+      xargs -0 -r -t -I {} \
       snyk test \
         --org="${SNYK_ORG}" \
         --project-name="${ADDON_GITHUB_REPO}" \
-        --docker "registry.gitlab.com/${CI_PROJECT_PATH}/${ADDON_ARCH}:${CI_COMMIT_SHA}" \
-        --file="${ADDON_TARGET}/Dockerfile"
-  tags:
-    - scan
-
-.monitor: &monitor
-  <<: *dind
-  stage: monitor
-  image: pipelinecomponents/snyk:edge
-  allow_failure: true
-  before_script:
-    - docker info
-    - docker pull "registry.gitlab.com/${CI_PROJECT_PATH}/${SNYK_MONITOR_ARCH}:${CI_COMMIT_SHA}"
-  script:
-    - |
-      snyk monitor \
-        --org="${SNYK_ORG}" \
-        --project-name="${ADDON_GITHUB_REPO}" \
-        --docker "registry.gitlab.com/${CI_PROJECT_PATH}/${SNYK_MONITOR_ARCH}:${CI_COMMIT_SHA}" \
-        --file="${ADDON_TARGET}/Dockerfile"
-  only:
-    refs:
-      - /^v\d+\.\d+\.\d+(?:(?:(?:\+|\.)?[a-zA-Z0-9]+)*)?$/
-    variables:
-      - $SNYK_MONITOR == "true"
+        --file={}
   tags:
     - scan
 
@@ -432,45 +415,66 @@ build:amd64:
     - amd64
 
 # Scan jobs
-snyk:armhf:
-  <<: *scan
-  variables:
-    ADDON_ARCH: armhf
+snyk:docker:
+  <<: *dind
+  stage: scan
+  image: pipelinecomponents/snyk:edge
+  allow_failure: true
+  before_script:
+    - docker info
+    - docker pull "registry.gitlab.com/${CI_PROJECT_PATH}/${SNYK_MONITOR_ARCH}:${CI_COMMIT_SHA}"
+  script:
+    - |
+      snyk test \
+        --org="${SNYK_ORG}" \
+        --project-name="${ADDON_GITHUB_REPO}" \
+        --docker "registry.gitlab.com/${CI_PROJECT_PATH}/${SNYK_MONITOR_ARCH}:${CI_COMMIT_SHA}" \
+        --file="${ADDON_TARGET}/Dockerfile"
   only:
     variables:
-      - $ADDON_ARMHF == "true"
+      - $SNYK_DOCKER == "true"
+  tags:
+    - scan
 
-snyk:armv7:
+snyk:yarn:
   <<: *scan
   variables:
-    ADDON_ARCH: armv7
+    SCANFILE: yarn.lock
   only:
     variables:
-      - $ADDON_ARMV7 == "true"
+      - $SNYK_YARN == "true"
 
-snyk:aarch64:
+snyk:npm:
   <<: *scan
   variables:
-    ADDON_ARCH: aarch64
+    SCANFILE: package-lock.json
   only:
     variables:
-      - $ADDON_AARCH64 == "true"
+      - $SNYK_NPM == "true"
 
-snyk:i386:
+snyk:ruby:
   <<: *scan
   variables:
-    ADDON_ARCH: i386
+    SCANFILE: Gemfile.lock
   only:
     variables:
-      - $ADDON_I386 == "true"
+      - $SNYK_RUBY == "true"
 
-snyk:amd64:
+snyk:pip:
   <<: *scan
   variables:
-    ADDON_ARCH: amd64
+    SCANFILE: requirements.txt
   only:
     variables:
-      - $ADDON_AMD64 == "true"
+      - $SNYK_PIP == "true"
+
+snyk:composer:
+  <<: *scan
+  variables:
+    SCANFILE: composer.lock
+  only:
+    variables:
+      - $SNYK_COMPOSER == "true"
 
 # Deploy jobs
 deploy:armhf:
@@ -601,7 +605,24 @@ publish:edge:
     name: edge
 
 snyk:monitor:
-  <<: *monitor
+  <<: *dind
+  stage: monitor
+  image: pipelinecomponents/snyk:edge
+  allow_failure: true
+  before_script:
+    - docker info
+    - docker pull "registry.gitlab.com/${CI_PROJECT_PATH}/${SNYK_MONITOR_ARCH}:${CI_COMMIT_SHA}"
+  script:
+    - |
+      snyk monitor \
+        --org="${SNYK_ORG}" \
+        --project-name="${ADDON_GITHUB_REPO}" \
+        --docker "registry.gitlab.com/${CI_PROJECT_PATH}/${SNYK_MONITOR_ARCH}:${CI_COMMIT_SHA}" \
+        --file="${ADDON_TARGET}/Dockerfile"
   only:
+    refs:
+      - /^v\d+\.\d+\.\d+(?:(?:(?:\+|\.)?[a-zA-Z0-9]+)*)?$/
     variables:
       - $SNYK_MONITOR == "true"
+  tags:
+    - scan

@@ -243,11 +243,11 @@ stages:
         docker manifest create \
           --amend \
           "${DOCKER_HUB_ORG}/${ADDON_SLUG}:${TAG}" \
-          "${DOCKER_HUB_ORG}/${ADDON_SLUG}:armhf-${REF}"
+          "${DOCKER_HUB_ORG}/${ADDON_SLUG}:armv7-${REF}"
 
         docker manifest annotate \
           "${DOCKER_HUB_ORG}/${ADDON_SLUG}:${TAG}" \
-          "${DOCKER_HUB_ORG}/${ADDON_SLUG}:armhf-${REF}" \
+          "${DOCKER_HUB_ORG}/${ADDON_SLUG}:armv7-${REF}" \
           --os=linux \
           --arch=arm \
           --variant="${ADDON_ARMV7_VARIANT}"
@@ -257,7 +257,7 @@ stages:
         docker manifest create \
           --amend \
           "${DOCKER_HUB_ORG}/${ADDON_SLUG}:${TAG}" \
-          "${DOCKER_HUB_ORG}/${ADDON_SLUG}:armhf-${REF}"
+          "${DOCKER_HUB_ORG}/${ADDON_SLUG}:i386-${REF}"
 
         docker manifest annotate \
           "${DOCKER_HUB_ORG}/${ADDON_SLUG}:${TAG}" \

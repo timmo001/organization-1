@@ -9,15 +9,18 @@ variables:
   ADDON_AARCH64: "false"
   ADDON_AMD64: "false"
   ADDON_ARMHF: "false"
+  ADDON_ARMV7: "false"
   ADDON_I386: "false"
 
   ADDON_AARCH64_BASE: "hassioaddons/base-aarch64:latest"
   ADDON_AMD64_BASE: "hassioaddons/base-amd64:latest"
   ADDON_ARMHF_BASE: "hassioaddons/base-armhf:latest"
+  ADDON_ARMV7_BASE: "hassioaddons/base-armv7:latest"
   ADDON_I386_BASE: "hassioaddons/base-i386:latest"
 
   ADDON_AARCH64_VARIANT: "v8"
   ADDON_ARMHF_VARIANT: "v6"
+  ADDON_ARMV7_VARIANT: "v7"
 
   ADDON_LEGACY_TAGS: "false"
 
@@ -25,7 +28,15 @@ variables:
   ADDONS_REPO_BETA: "hassio-addons/repository-beta"
   ADDONS_REPO_EDGE: "hassio-addons/repository-edge"
 
+  PREFLIGHT_HADOLINT: "false"
+  PREFLIGHT_JSONLINT: "false"
+  PREFLIGHT_MARKDOWNLINT: "false"
+  PREFLIGHT_SHELLCHECK: "false"
+  PREFLIGHT_YAMLLINT: "false"
+  
   SNYK_ORG: "community-hass.io-add-ons"
+  SNYK_MONITOR: "false"
+  SNYK_MONITOR_ARCH: "amd64"
 
   DOCKER_DRIVER: overlay2
   DOCKER_HUB_ORG: hassioaddons
@@ -37,6 +48,7 @@ stages:
   - deploy
   - manifest
   - publish
+  - monitor
 
 # Generic DIND template
 .dind: &dind
@@ -91,22 +103,38 @@ stages:
   image: pipelinecomponents/snyk:edge
   allow_failure: true
   before_script:
-    - export DOCKER_HOST="tcp://docker:2375"
     - docker info
     - docker pull "registry.gitlab.com/${CI_PROJECT_PATH}/${ADDON_ARCH}:${CI_COMMIT_SHA}"
   script:
-    - |
-      echo snyk test \
-        --org="${SNYK_ORG}" \
-        --project-name="${ADDON_GITHUB_REPO}" \
-        --docker "registry.gitlab.com/${CI_PROJECT_PATH}/${ADDON_ARCH}:${CI_COMMIT_SHA}" \
-        --file="${ADDON_TARGET}/Dockerfile"
     - |
       snyk test \
         --org="${SNYK_ORG}" \
         --project-name="${ADDON_GITHUB_REPO}" \
         --docker "registry.gitlab.com/${CI_PROJECT_PATH}/${ADDON_ARCH}:${CI_COMMIT_SHA}" \
         --file="${ADDON_TARGET}/Dockerfile"
+  tags:
+    - scan
+
+.monitor: &monitor
+  <<: *dind
+  stage: monitor
+  image: pipelinecomponents/snyk:edge
+  allow_failure: true
+  before_script:
+    - docker info
+    - docker pull "registry.gitlab.com/${CI_PROJECT_PATH}/${SNYK_MONITOR_ARCH}:${CI_COMMIT_SHA}"
+  script:
+    - |
+      snyk monitor \
+        --org="${SNYK_ORG}" \
+        --project-name="${ADDON_GITHUB_REPO}" \
+        --docker "registry.gitlab.com/${CI_PROJECT_PATH}/${SNYK_MONITOR_ARCH}:${CI_COMMIT_SHA}" \
+        --file="${ADDON_TARGET}/Dockerfile"
+  only:
+    refs:
+      - /^v\d+\.\d+\.\d+(?:(?:(?:\+|\.)?[a-zA-Z0-9]+)*)?$/
+    variables:
+      - $SNYK_MONITOR == "true"
   tags:
     - scan
 
@@ -211,6 +239,20 @@ stages:
           --variant="${ADDON_ARMHF_VARIANT}"
       fi
     - |
+      if [ "${ADDON_ARMV7}" = "true" ]; then
+        docker manifest create \
+          --amend \
+          "${DOCKER_HUB_ORG}/${ADDON_SLUG}:${TAG}" \
+          "${DOCKER_HUB_ORG}/${ADDON_SLUG}:armhf-${REF}"
+
+        docker manifest annotate \
+          "${DOCKER_HUB_ORG}/${ADDON_SLUG}:${TAG}" \
+          "${DOCKER_HUB_ORG}/${ADDON_SLUG}:armhf-${REF}" \
+          --os=linux \
+          --arch=arm \
+          --variant="${ADDON_ARMV7_VARIANT}"
+      fi
+    - |
       if [ "${ADDON_I386}" = "true" ]; then
         docker manifest create \
           --amend \
@@ -256,6 +298,9 @@ hadolint:
     - hadolint --version
   script:
     - hadolint "${ADDON_TARGET}/Dockerfile"
+  only:
+    variables:
+      - $PREFLIGHT_HADOLINT == "true"
 
 shellcheck:
   <<: *preflight
@@ -278,6 +323,9 @@ shellcheck:
       if [ "${FAILED}" = "1" ]; then
         exit 1
       fi
+  only:
+    variables:
+      - $PREFLIGHT_SHELLCHECK == "true"
 
 yamllint:
   <<: *preflight
@@ -286,6 +334,9 @@ yamllint:
     - yamllint --version
   script:
     - yamllint .
+  only:
+    variables:
+      - $PREFLIGHT_YAMLLINT == "true"
 
 jsonlint:
   <<: *preflight
@@ -304,6 +355,9 @@ jsonlint:
       if [ "${FAILED}" = "1" ]; then
         exit 1
       fi
+  only:
+    variables:
+      - $PREFLIGHT_JSONLINT == "true"
 
 markdownlint:
   <<: *preflight
@@ -312,6 +366,9 @@ markdownlint:
     - mdl --version
   script:
     - mdl --style all --warnings .
+  only:
+    variables:
+      - $PREFLIGHT_MARKDOWNLINT == "true"
 
 # Build Jobs
 build:armhf:
@@ -325,6 +382,18 @@ build:armhf:
   tags:
     - build
     - armhf
+
+build:armv7:
+  <<: *build
+  variables:
+    ADDON_ARCH: armv7
+    FROM: "${ADDON_ARMV7_BASE}"
+  only:
+    variables:
+      - $ADDON_ARMV7 == "true"
+  tags:
+    - build
+    - armv7
 
 build:aarch64:
   <<: *build
@@ -371,6 +440,14 @@ snyk:armhf:
     variables:
       - $ADDON_ARMHF == "true"
 
+snyk:armv7:
+  <<: *scan
+  variables:
+    ADDON_ARCH: armv7
+  only:
+    variables:
+      - $ADDON_ARMV7 == "true"
+
 snyk:aarch64:
   <<: *scan
   variables:
@@ -406,6 +483,19 @@ deploy:armhf:
       - /^v\d+\.\d+\.\d+(?:-(?:beta|rc)(?:(?:(?:\+|\.)?[a-zA-Z0-9]+)*)?)?$/
     variables:
       - $ADDON_ARMHF == "true"
+  except:
+    - /^(?!master).+@/
+
+deploy:armv7:
+  <<: *deploy
+  variables:
+    ADDON_ARCH: armv7
+  only:
+    refs:
+      - master
+      - /^v\d+\.\d+\.\d+(?:-(?:beta|rc)(?:(?:(?:\+|\.)?[a-zA-Z0-9]+)*)?)?$/
+    variables:
+      - $ADDON_ARMV7 == "true"
   except:
     - /^(?!master).+@/
 
@@ -511,18 +601,7 @@ publish:edge:
     name: edge
 
 snyk:monitor:
-  <<: *publish
-  image: pipelinecomponents/snyk:edge
-  allow_failure: true
-  before_script:
-    - export DOCKER_HOST="tcp://docker:2375"
-    - docker info
-    - docker pull "registry.gitlab.com/${CI_PROJECT_PATH}/${ADDON_ARCH}:${CI_COMMIT_SHA}"
-  script:
-    - snyk monitor \
-        --org="${SNYK_ORG}" \
-        --project-name="${ADDON_GITHUB_REPO}" \
-        --docker "registry.gitlab.com/${CI_PROJECT_PATH}/${ADDON_ARCH}:${CI_COMMIT_SHA}" \
-        --file="${ADDON_TARGET}/Dockerfile"
+  <<: *monitor
   only:
-    - /^v\d+\.\d+\.\d+(?:(?:(?:\+|\.)?[a-zA-Z0-9]+)*)?$/
+    variables:
+      - $SNYK_MONITOR == "true"

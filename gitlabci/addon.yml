@@ -6,11 +6,11 @@ variables:
   ADDON_SLUG: "example"
   ADDON_TARGET: "example"
 
-  ADDON_AARCH64: "false"
-  ADDON_AMD64: "false"
-  ADDON_ARMHF: "false"
-  ADDON_ARMV7: "false"
-  ADDON_I386: "false"
+  ADDON_AARCH64: "true"
+  ADDON_AMD64: "true"
+  ADDON_ARMHF: "true"
+  ADDON_ARMV7: "true"
+  ADDON_I386: "true"
 
   ADDON_AARCH64_BASE: "hassioaddons/base-aarch64:latest"
   ADDON_AMD64_BASE: "hassioaddons/base-amd64:latest"
@@ -28,22 +28,22 @@ variables:
   ADDONS_REPO_BETA: "hassio-addons/repository-beta"
   ADDONS_REPO_EDGE: "hassio-addons/repository-edge"
 
-  PREFLIGHT_HADOLINT: "false"
-  PREFLIGHT_JSONLINT: "false"
-  PREFLIGHT_MARKDOWNLINT: "false"
-  PREFLIGHT_SHELLCHECK: "false"
-  PREFLIGHT_YAMLLINT: "false"
+  PREFLIGHT_HADOLINT: "true"
+  PREFLIGHT_JSONLINT: "true"
+  PREFLIGHT_MARKDOWNLINT: "true"
+  PREFLIGHT_SHELLCHECK: "true"
+  PREFLIGHT_YAMLLINT: "true"
   
   SNYK_ORG: "community-hass.io-add-ons"
 
+  SNYK_DOCKER: "true"
   SNYK_COMPOSER: "false"
-  SNYK_DOCKER: "false"
   SNYK_NPM: "false"
   SNYK_PIP: "false"
   SNYK_RUBY: "false"
   SNYK_YARN: "false"
 
-  SNYK_MONITOR: "false"
+  SNYK_MONITOR: "true"
   SNYK_MONITOR_ARCH: "amd64"
 
   DOCKER_DRIVER: overlay2
